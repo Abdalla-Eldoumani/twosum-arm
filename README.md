@@ -28,10 +28,27 @@ and looked up.
 
 ## What the visualizer shows
 
-During brute force, cell `i` is yellow, cell `j` is cyan, and the
+Startup lands on a boxed welcome screen; press enter and the main
+menu takes over. The menu shows your current state (array loaded,
+target set, animation speed) so you always see what's staged, plus
+a tip line that points newcomers at a good first path through the
+options.
+
+Every run screen has four stacked panels: the phase header with
+the target on the right, the array row with coloured cells, the
+hash-table panel for hash runs, a narration strip, and a live
+stats line. A colour legend sits at the bottom so you never have
+to guess what yellow means.
+
+During brute force, cell `i` is yellow and cell `j` is cyan. The
 narration below the array tracks each comparison:
 
-    i=0  j=1   arr[0]+arr[1] = 2 + 7 = 9   target = 9 MATCH.
+    i=0  j=1   arr[0]+arr[1] = 2 + 7 = 9   target = 9
+                                                       MATCH.
+
+The stats line shows comparisons against the worst case:
+
+    comparisons: 1    / 6     (max n*(n-1)/2)
 
 During hash set, the array sits on top and the 16-slot hash table
 is drawn in two rows of eight. The active probe flashes magenta, a
@@ -43,67 +60,130 @@ yellow. The trace panel narrates each step:
     slot 7 is empty.  complement is not in the table yet.
     record (val=2, idx=0) at slot 2, then move on.
 
-Both runs also show live counters: comparisons for brute force,
-probes and inserts for the hash run.
+Stats show the probe and insert counters running live.
 
 ## Presets
 
 Six presets cover the cases worth watching:
 
-| name       | array                 | target | what it shows                |
-| ---------- | --------------------- | ------ | ---------------------------- |
-| classic    | `[2, 7, 11, 15]`      | 9      | early match                  |
-| negatives  | `[-3, 4, 1, -1]`      | 0      | negatives work fine          |
+| name       | array                 | target | what it shows                 |
+| ---------- | --------------------- | ------ | ----------------------------- |
+| classic    | `[2, 7, 11, 15]`      | 9      | early match                   |
+| negatives  | `[-3, 4, 1, -1]`      | 0      | negatives work fine           |
 | duplicates | `[5, 5]`              | 10     | two slots with the same value |
-| no pair    | `[1, 2, 3, 4, 5]`     | 100    | the miss path                |
-| late match | `[3, 3, 4, 7, 1, 8]`  | 10     | table partially full         |
-| collision  | `[0, 16, 32, 48, 33]` | 49     | heavy linear probing         |
+| no pair    | `[1, 2, 3, 4, 5]`     | 100    | the miss path                 |
+| late match | `[3, 3, 4, 7, 1, 8]`  | 10     | table partially full          |
+| collision  | `[0, 16, 32, 48, 33]` | 49     | heavy linear probing          |
 
 The collision preset is the most fun to watch: every value hashes
 to slot 0, so the insert has to probe 0 -> 1 -> 2 -> 3 before
 finding room, and the later lookup walks that same chain.
 
-## Build
+## Getting started
 
-On ARM hardware:
+Pick the section that matches your setup.
 
-    make
+### Linux x86_64
 
-On an x86 host with the cross toolchain installed:
+You're cross-compiling the assembly and running the result under
+QEMU user-mode emulation. Install the toolchain:
+
+    sudo apt-get install m4 gcc-aarch64-linux-gnu qemu-user-static make
+
+Build both binaries:
 
     make cross
 
-Then run:
+Run through QEMU (the `-static` link in the Makefile means no ARM
+libc needs to be on disk):
 
-    ./two_sum       # plain solver
-    ./two_sum_viz   # visualizer
+    qemu-aarch64-static ./two_sum_viz
+    qemu-aarch64-static ./two_sum
 
-Or without the Makefile:
+On Fedora / RHEL, the package names are `m4`,
+`gcc-aarch64-linux-gnu`, and `qemu-user-static`. On Arch, `m4`,
+`aarch64-linux-gnu-gcc` (from AUR), and `qemu-user-static`.
+
+### Windows (via WSL)
+
+WSL runs a real Linux kernel on x86_64, so the Linux path above
+applies. Open a WSL shell (Ubuntu is the typical pick) and:
+
+    sudo apt-get update
+    sudo apt-get install m4 gcc-aarch64-linux-gnu qemu-user-static make
+    make cross
+    qemu-aarch64-static ./two_sum_viz
+
+Use **Windows Terminal**, not the legacy `cmd.exe`. Windows
+Terminal handles UTF-8 (for the box drawing in the welcome splash
+and the section dividers) and ANSI colour correctly out of the
+box; `cmd.exe` mangles both.
+
+If you're on Windows 10, set your WSL default to WSL2 so the
+Linux kernel features used by QEMU all work:
+
+    wsl --set-default-version 2
+
+### Native ARM Linux (Raspberry Pi, ARM server, any aarch64 Linux box)
+
+If your shell itself runs on aarch64, skip QEMU entirely. Install:
+
+    sudo apt-get install m4 gcc make
+
+Build native and run directly:
+
+    make
+    ./two_sum_viz
+    ./two_sum
+
+### macOS on Apple Silicon
+
+macOS uses Mach-O binaries and BSD system calls, so the Linux ELF
+the Makefile produces won't run natively. Run a Linux arm64
+container and follow the "Native ARM Linux" steps inside it. Any
+of these will do:
+
+- [OrbStack](https://orbstack.dev) (fastest, designed for this)
+- Docker Desktop with a Linux arm64 image (`docker run -it --rm ubuntu`)
+- [UTM](https://mac.getutm.app) for a full VM
+- Lima, colima, or Multipass for a headless VM
+
+### Terminal requirements
+
+At least 80 columns wide, around 26 rows tall, with UTF-8 support
+and ANSI colour. Any modern terminal handles both: Windows
+Terminal, iTerm2, Alacritty, Kitty, WezTerm, gnome-terminal,
+Konsole, or the VS Code integrated terminal.
+
+## Building without the Makefile
+
+If you'd rather drive the toolchain by hand:
 
     m4 two_sum_viz.asm > two_sum_viz.s
-    gcc -o two_sum_viz two_sum_viz.s
+    aarch64-linux-gnu-gcc -static two_sum_viz.s -o two_sum_viz
+
+(Use plain `gcc` instead of `aarch64-linux-gnu-gcc` on a native
+aarch64 host.)
 
 ## Controls
 
 The visualizer is menu-driven. Numbers pick menu items. From the
 main menu you can set the array (preset or manual), set the
 target, adjust the animation delay (100-3000 ms per frame, default
-700), and then watch one or both algorithms run. After a run,
-press enter to return to the main menu.
+700), and watch one or both algorithms run. After a run, press
+enter to return to the main menu.
 
 ## Notes
 
 - Array capped at 10 elements so the row fits in 80 columns.
-- Hash table has 16 slots (mask `0x0F`) so both halves fit on
-  screen. The plain solver in `two_sum.asm` uses a 256-slot table
-  for the same reason every real hash set uses a big load-factor
-  headroom: fewer collisions. The behaviour is identical; the
-  shrunken table in the visualizer just makes everything visible.
-- Needs a terminal at least 80 columns wide and around 26 rows
-  tall, with ANSI colour support.
+- The visualizer's hash table has 16 slots (mask `0x0F`) so both
+  halves fit on screen. The plain solver uses a 256-slot table
+  instead, which keeps collisions rare the way a real hash set
+  should. The shrunken table in the visualizer doesn't change the
+  algorithm's behaviour; it just makes every slot visible at once.
 - No whole-screen flicker: only cells that change get redrawn
   between frames.
-- The visualizer section of this project was inspired by another project that I built: https://github.com/Abdalla-Eldoumani/dsav
+- The visualizer was inspired by another project I built: <https://github.com/Abdalla-Eldoumani/dsav>
 
 ## License
 
