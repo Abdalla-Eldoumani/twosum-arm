@@ -1,0 +1,24 @@
+# Build artifacts
+two_sum
+two_sum_viz
+*.s
+*.o
+*.out
+*.exe
+
+# Debugger / linker droppings
+*.dSYM/
+*.gdb_history
+core
+core.*
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
