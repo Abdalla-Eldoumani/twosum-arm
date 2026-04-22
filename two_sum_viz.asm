@@ -101,10 +101,10 @@ msg_bye:        .string "bye."
 phase_brute:    .string "BRUTE FORCE     check every pair (i, j) with i < j"
 phase_hash:     .string "HASH SET        for each i, look up target - arr[i]"
 
-sec_array:      .string "ARRAY"
-sec_hash:       .string "HASH TABLE (16 slots, start = val & 0x0F, linear probing)"
-sec_trace:      .string "TRACE"
-sec_stats:      .string "STATS"
+sec_array:      .string "─── ARRAY ────────────────────────────────────────────────────────────"
+sec_hash:       .string "─── HASH TABLE ─── 16 slots, start = val & 0x0F, linear probing ──────"
+sec_trace:      .string "─── TRACE ────────────────────────────────────────────────────────────"
+sec_stats:      .string "─── STATS ────────────────────────────────────────────────────────────"
 
 narr_bf_start:  .string "starting sweep.  pair (i, j) walks every combination until sum == target."
 narr_bf_check:  .string "i=%d  j=%d   arr[%d]+arr[%d] = %d + %d = %d   target = %d"
@@ -123,12 +123,40 @@ narr_hs_insert:      .string "record (val=%d, idx=%d) at slot %d, then move on."
 narr_hs_none:        .string "walked every element.  no pair sums to %d."
 narr_hs_result:      .string "result: arr[%d] (%d) + arr[%d] (%d) = %d.  probes: %d  inserts: %d."
 
-stats_bf_fmt:   .string "comparisons: %-4d"
+stats_bf_fmt:   .string "comparisons: %-3d / %-3d  (max n*(n-1)/2)"
 stats_hs_fmt:   .string "probes: %-4d   inserts: %-4d"
 
-state_none:     .string "state: array = <unset>   target = <unset>   speed = %d ms/frame"
-state_no_tgt:   .string "state: n = %d           target = <unset>   speed = %d ms/frame"
-state_full:     .string "state: n = %d           target = %d        speed = %d ms/frame"
+// State block on the main menu -- three lines (array, target, speed)
+// instead of one cramped line. Shows the actual array values.
+state_lbl_arr:  .string "array:   "
+state_lbl_tgt:  .string "target:  "
+state_lbl_spd:  .string "speed:   %d ms/frame"
+state_unset:    .string "<unset>"
+state_open:     .string "["
+state_close:    .string "]"
+state_comma:    .string ", "
+
+// One-line hint shown on the main menu to orient newcomers.
+menu_tip:       .string "tip: first time?  try [1] preset 1, then [7] to compare both algorithms."
+
+// Right-side readout in the run-screen header.
+run_target_fmt: .string "target = %d"
+
+// Colour legends drawn once per run.  The SGR codes are embedded
+// directly in the string so the word "yellow" literally renders in
+// yellow, "cyan" in cyan, and so on -- self-demonstrating legend.
+legend_bf:      .string "\x1b[90mlegend:\x1b[0m  \x1b[33myellow\x1b[0m = i    \x1b[36mcyan\x1b[0m = j    \x1b[32mgreen\x1b[0m = match"
+legend_hs:      .string "\x1b[90mlegend:\x1b[0m  \x1b[35mmagenta\x1b[0m = probing    \x1b[32mgreen\x1b[0m = hit    \x1b[31mred\x1b[0m = collision    \x1b[33myellow\x1b[0m = insert"
+
+// Welcome splash shown once on startup.
+splash_box_t:   .string "╭──────────────────────────────────╮"
+splash_box_m:   .string "│         TWO-SUM, TRACED          │"
+splash_box_b:   .string "╰──────────────────────────────────╯"
+splash_l1:      .string "walk two-sum step by step in aarch64 assembly."
+splash_l2:      .string "brute force O(n^2) and hash set O(n), side by side,"
+splash_l3:      .string "with colour, carets, and a narration panel."
+splash_l4:      .string "6 presets, manual input, adjustable speed.  MIT licensed."
+splash_prmpt:   .string "press enter to begin . . ."
 
 fmt_int:        .string "%d"
 fmt_idx_head:   .string " [%d] "
@@ -180,6 +208,8 @@ main:
 
         ldr     x0, =target_set
         str     wzr, [x0]
+
+        bl      draw_splash
 
 main_loop:
         bl      draw_main_menu
@@ -243,6 +273,116 @@ main_exit:
         ldr     x0, =newline
         bl      printf
         mov     w0, 0
+        ldp     fp, lr, [sp], 16
+        ret
+
+
+// draw_splash paints a one-time welcome screen on startup: a boxed
+// title, three lines of description, and a press-enter prompt.  It
+// blocks on the user's keypress and returns so main_loop can take
+// over.  Running it again would look fine, but we only call it
+// once -- on menu returns the main menu stands on its own.
+draw_splash:
+        stp     fp, lr, [sp, -16]!
+        mov     fp, sp
+
+        bl      clear_screen
+        bl      hide_cursor_call
+
+        mov     w0, 6
+        mov     w1, 22
+        bl      move_cursor
+        mov     w0, 90
+        bl      set_sgr
+        ldr     x0, =splash_box_t
+        bl      printf
+        bl      reset_sgr
+
+        mov     w0, 7
+        mov     w1, 22
+        bl      move_cursor
+        mov     w0, 90
+        bl      set_sgr
+        ldr     x0, =splash_box_m
+        bl      printf
+        bl      reset_sgr
+
+        mov     w0, 8
+        mov     w1, 22
+        bl      move_cursor
+        mov     w0, 90
+        bl      set_sgr
+        ldr     x0, =splash_box_b
+        bl      printf
+        bl      reset_sgr
+
+        mov     w0, 11
+        mov     w1, 14
+        bl      move_cursor
+        ldr     x0, =splash_l1
+        bl      printf
+
+        mov     w0, 12
+        mov     w1, 14
+        bl      move_cursor
+        ldr     x0, =splash_l2
+        bl      printf
+
+        mov     w0, 13
+        mov     w1, 14
+        bl      move_cursor
+        ldr     x0, =splash_l3
+        bl      printf
+
+        mov     w0, 15
+        mov     w1, 14
+        bl      move_cursor
+        ldr     x0, =splash_l4
+        bl      printf
+
+        mov     w0, 19
+        mov     w1, 26
+        bl      move_cursor
+        mov     w0, 90
+        bl      set_sgr
+        ldr     x0, =splash_prmpt
+        bl      printf
+        bl      reset_sgr
+
+        mov     x0, 0
+        bl      fflush
+        bl      clear_input_buffer
+
+        ldp     fp, lr, [sp], 16
+        ret
+
+
+// draw_legend_bf and draw_legend_hs paint a one-line colour key at
+// the bottom of a run screen.  The SGR codes that colour each word
+// are baked into the string itself, so one printf renders the
+// whole legend -- no per-word set_sgr / reset_sgr dance.
+draw_legend_bf:
+        stp     fp, lr, [sp, -16]!
+        mov     fp, sp
+        mov     w0, 24
+        mov     w1, 4
+        bl      move_cursor
+        ldr     x0, =legend_bf
+        bl      printf
+        bl      reset_sgr
+        ldp     fp, lr, [sp], 16
+        ret
+
+
+draw_legend_hs:
+        stp     fp, lr, [sp, -16]!
+        mov     fp, sp
+        mov     w0, 24
+        mov     w1, 4
+        bl      move_cursor
+        ldr     x0, =legend_hs
+        bl      printf
+        bl      reset_sgr
         ldp     fp, lr, [sp], 16
         ret
 
@@ -311,9 +451,19 @@ draw_main_menu:
         mov     w0, 16
         mov     w1, 4
         bl      move_cursor
-        bl      draw_state_line
+        bl      draw_state_block
 
-        mov     w0, 18
+        // Onboarding tip, dim so it does not compete with the menu.
+        mov     w0, 20
+        mov     w1, 4
+        bl      move_cursor
+        mov     w0, 90
+        bl      set_sgr
+        ldr     x0, =menu_tip
+        bl      printf
+        bl      reset_sgr
+
+        mov     w0, 22
         mov     w1, 4
         bl      move_cursor
         ldr     x0, =menu_prompt
@@ -355,53 +505,93 @@ draw_header:
         ret
 
 
-// draw_state_line prints a one-line summary of what the user has
-// set: array size, target, and animation delay. Three templates
-// cover the three combinations of "array set" and "target set".
-// Everything comes from memory and the whole line is dim grey.
-draw_state_line:
-        stp     fp, lr, [sp, -16]!
+// draw_state_block paints a three-line summary of current state at
+// rows 16 / 17 / 18 -- array contents, target, animation speed.
+// Everything is dim grey so the block reads as secondary info
+// rather than competing with the menu options.  The array is
+// printed element by element with commas so the user sees exactly
+// what got loaded (from preset or manual entry).
+draw_state_block:
+        stp     fp, lr, [sp, -32]!
         mov     fp, sp
 
         mov     w0, 90
         bl      set_sgr
 
+        // Row 16: "array:   [v0, v1, ..., vN-1]" or "<unset>".
+        mov     w0, 16
+        mov     w1, 4
+        bl      move_cursor
+        ldr     x0, =state_lbl_arr
+        bl      printf
+
         ldr     x9, =n
         ldr     w9, [x9]
-        cbz     w9, dsl_none
+        cbz     w9, dsb_arr_unset
 
+        ldr     x0, =state_open
+        bl      printf
+        str     wzr, [fp, 16]
+dsb_arr_loop:
+        ldr     w9, [fp, 16]
+        ldr     x10, =n
+        ldr     w10, [x10]
+        cmp     w9, w10
+        b.ge    dsb_arr_done
+
+        cbz     w9, dsb_arr_first
+        ldr     x0, =state_comma
+        bl      printf
+dsb_arr_first:
+        ldr     x0, =fmt_int
+        ldr     x9, =arr
+        ldr     w10, [fp, 16]
+        ldr     w1, [x9, w10, SXTW #2]
+        bl      printf
+
+        ldr     w9, [fp, 16]
+        add     w9, w9, 1
+        str     w9, [fp, 16]
+        b       dsb_arr_loop
+dsb_arr_done:
+        ldr     x0, =state_close
+        bl      printf
+        b       dsb_target
+dsb_arr_unset:
+        ldr     x0, =state_unset
+        bl      printf
+
+dsb_target:
+        // Row 17: "target:  N" or "<unset>".
+        mov     w0, 17
+        mov     w1, 4
+        bl      move_cursor
+        ldr     x0, =state_lbl_tgt
+        bl      printf
         ldr     x9, =target_set
         ldr     w9, [x9]
-        cbz     w9, dsl_no_tgt
-
-        ldr     x9, =n
-        ldr     w1, [x9]
+        cbz     w9, dsb_tgt_unset
+        ldr     x0, =fmt_int
         ldr     x9, =target
-        ldr     w2, [x9]
-        ldr     x9, =anim_delay
-        ldr     w3, [x9]
-        ldr     x0, =state_full
-        bl      printf
-        b       dsl_done
-
-dsl_no_tgt:
-        ldr     x9, =n
         ldr     w1, [x9]
-        ldr     x9, =anim_delay
-        ldr     w2, [x9]
-        ldr     x0, =state_no_tgt
         bl      printf
-        b       dsl_done
+        b       dsb_speed
+dsb_tgt_unset:
+        ldr     x0, =state_unset
+        bl      printf
 
-dsl_none:
+dsb_speed:
+        // Row 18: "speed:   N ms/frame".
+        mov     w0, 18
+        mov     w1, 4
+        bl      move_cursor
+        ldr     x0, =state_lbl_spd
         ldr     x9, =anim_delay
         ldr     w1, [x9]
-        ldr     x0, =state_none
         bl      printf
 
-dsl_done:
         bl      reset_sgr
-        ldp     fp, lr, [sp], 16
+        ldp     fp, lr, [sp], 32
         ret
 
 
@@ -1170,6 +1360,7 @@ draw_stats:
 
         ldr     x0, =stats_bf_fmt
         ldr     w1, [fp, 20]
+        ldr     w2, [fp, 24]
         bl      printf
         b       ds_done
 ds_hs:
@@ -1196,6 +1387,7 @@ ds_done:
 //   w22  comparisons counter
 //   w23  i
 //   w24  j
+//   w28  max pairs = n*(n-1)/2, printed next to the live counter
 run_brute_force:
         stp     fp, lr, [sp, -16]!
         mov     fp, sp
@@ -1222,6 +1414,26 @@ run_brute_force:
         mov     w23, 0
         mov     w24, 0
 
+        // Target readout on the right of the phase row.
+        mov     w0, 5
+        mov     w1, 62
+        bl      move_cursor
+        mov     w0, 90
+        bl      set_sgr
+        ldr     x0, =run_target_fmt
+        mov     w1, w21
+        bl      printf
+        bl      reset_sgr
+
+        // max = n*(n-1)/2 for the STATS readout.  Computed once and
+        // stashed in w28 because scratch regs get clobbered by the
+        // draw helpers below.
+        sub     w9, w20, 1
+        mul     w28, w20, w9
+        lsr     w28, w28, 1
+
+        bl      draw_legend_bf
+
         // Intro frame: array with no highlights, intro narration.
         bl      clear_trace_area
         mov     w0, 19
@@ -1236,7 +1448,7 @@ run_brute_force:
         bl      draw_array
         mov     w0, 0
         mov     w1, w22
-        mov     w2, 0
+        mov     w2, w28
         bl      draw_stats
         bl      frame_flush_delay
 
@@ -1285,7 +1497,7 @@ bf_inner:
         bl      draw_array
         mov     w0, 0
         mov     w1, w22
-        mov     w2, 0
+        mov     w2, w28
         bl      draw_stats
 
         // Miss vs match. The helpers clobbered scratch regs, so
@@ -1350,7 +1562,7 @@ bf_match:
         bl      draw_array
         mov     w0, 0
         mov     w1, w22
-        mov     w2, 0
+        mov     w2, w28
         bl      draw_stats
         bl      frame_wait_then_return
         b       bf_end
@@ -1373,7 +1585,7 @@ bf_none:
         bl      draw_array
         mov     w0, 0
         mov     w1, w22
-        mov     w2, 0
+        mov     w2, w28
         bl      draw_stats
         bl      frame_wait_then_return
 
@@ -1435,6 +1647,19 @@ rh_reset:
         mov     w22, 0
         mov     w23, 0
         mov     w24, 0
+
+        // Target readout on the right of the phase row.
+        mov     w0, 5
+        mov     w1, 62
+        bl      move_cursor
+        mov     w0, 90
+        bl      set_sgr
+        ldr     x0, =run_target_fmt
+        mov     w1, w21
+        bl      printf
+        bl      reset_sgr
+
+        bl      draw_legend_hs
 
         // Intro frame.
         bl      clear_trace_area
