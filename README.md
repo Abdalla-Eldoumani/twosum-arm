@@ -4,6 +4,9 @@ Two ARMv8 AArch64 assembly programs for the two-sum problem: a
 plain command-line solver (`two_sum.asm`) and an animated terminal
 visualizer (`two_sum_viz.asm`) that traces how the two algorithms find their pair.
 
+Run the visualizer in a browser, no toolchain:
+<https://aarch64-playground.vercel.app/playground?example=two-sum>
+
 ## Why
 
 I was scrolling reels one night, someone was solving two-sum in
@@ -15,7 +18,7 @@ it is. That's it. No deeper story. This is nothing short of a toy "project".
 `two_sum.asm` is the base solver. It reads an array and a target
 from stdin, then prints any pair (i, j) whose elements sum to the
 target. Two algorithms sit side by side in the same file and both
-run on the same input so you can see they agree:
+run on the same input so you can compare them:
 
 - A direct O(n^2) nested-loop search.
 - An O(n) pass using a 256-slot open-addressing hash set.
@@ -53,11 +56,13 @@ The stats line shows comparisons against the worst case:
 During hash set, the array sits on top and the 16-slot hash table
 is drawn in two rows of eight. The active probe flashes magenta, a
 collision is red, a hit is green, and a fresh insert flashes
-yellow. The trace panel narrates each step:
+yellow. Looking a value up and finding room for it both walk the
+table, and both get drawn. The trace panel narrates each step:
 
     i=0   val = arr[0] = 2   complement = target - val = 7
     look up 7.  initial slot = 7 & 0x0F = 7.
     slot 7 is empty.  complement is not in the table yet.
+    insert 2.  initial slot = 2 & 0x0F = 2.
     record (val=2, idx=0) at slot 2, then move on.
 
 Stats show the probe and insert counters running live.
@@ -173,15 +178,25 @@ target, adjust the animation delay (100-3000 ms per frame, default
 700), and watch one or both algorithms run. After a run, press
 enter to return to the main menu.
 
+Anything that isn't a number the prompt asked for gets a red line
+saying so and the prompt comes back.
+
 ## Notes
 
 - Array capped at 10 elements so the row fits in 80 columns.
+  Typed values run from -99 to 999 for the same reason: the cells
+  are five columns wide. Targets run from -9999 to 9999. The plain
+  solver is looser, it takes any whole number up to nine digits,
+  which is what keeps a sum inside 32 bits.
+- Both files report the *first* index of a repeated value, so
+  `[3, 3, 4, 7, 1, 8]` with target 10 gives `arr[0]` and `arr[3]`
+  everywhere: brute force, hash set, and the visualizer.
 - The visualizer's hash table has 16 slots (mask `0x0F`) so both
   halves fit on screen. The plain solver uses a 256-slot table
   instead, which keeps collisions rare the way a real hash set
   should. The shrunken table in the visualizer doesn't change the
   algorithm's behaviour; it just makes every slot visible at once.
-- No whole-screen flicker: only cells that change get redrawn
+- No whole-screen flicker: frames repaint in place, never a clear-screen
   between frames.
 - The visualizer was inspired by another project I built: <https://github.com/Abdalla-Eldoumani/dsav>
 
