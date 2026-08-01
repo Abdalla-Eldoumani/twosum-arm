@@ -1,5 +1,4 @@
 # Build artifacts
-two_sum
 two_sum_viz
 *.s
 *.o
