@@ -5,8 +5,12 @@
 // watch them work step by step.
 //
 // Build:
+//     make            native, on aarch64 hardware
+//     make cross      from an x86_64 host
+//
+// Or by hand, the same steps the Makefile runs:
 //     m4 two_sum_viz.asm > two_sum_viz.s
-//     gcc -o two_sum_viz two_sum_viz.s
+//     gcc -g two_sum_viz.s -o two_sum_viz
 //
 // Needs a terminal at least 80 columns wide and around 26 rows tall,
 // with ANSI colour support (any modern xterm, gnome-terminal, iTerm,
@@ -19,6 +23,23 @@ define(ARRAY_MAX, 10)
 define(HASH_SIZE, 16)
 define(HASH_MASK, 0x0F)
 define(DEFAULT_DELAY, 700)
+
+// Array cells are drawn five columns wide, so a value outside this
+// range would spill into its neighbour. The target gets a wider
+// range because it is only ever printed as plain text, and both
+// ranges keep target - arr[i] far away from a 32-bit wrap.
+define(VALUE_MIN, -99)
+define(VALUE_MAX, 999)
+define(TARGET_MIN, -9999)
+define(TARGET_MAX, 9999)
+
+// Longest run of digits a typed number may have (nine keeps the
+// parsed value inside 32 bits, so anything a user can type is
+// reported as out of range rather than as junk), and the rows where
+// an input handler confirms or explains an answer.
+define(DIGIT_MAX, 9)
+define(NOTICE_ROW, 24)
+define(STATUS_ROW, 22)
 
 // ANSI escape sequences. printf treats them as any other text, so
 // the drawing code is just a sequence of printfs with the right
@@ -67,36 +88,42 @@ preset_d6:      .word 0, 16, 32, 48, 33
 
         .balign 8
 preset_table:
-        .quad   preset_d1
+        .dword  preset_d1
         .word   4, 9
-        .quad   0
-        .quad   preset_d2
+        .dword  0
+        .dword  preset_d2
         .word   4, 0
-        .quad   0
-        .quad   preset_d3
+        .dword  0
+        .dword  preset_d3
         .word   2, 10
-        .quad   0
-        .quad   preset_d4
+        .dword  0
+        .dword  preset_d4
         .word   5, 100
-        .quad   0
-        .quad   preset_d5
+        .dword  0
+        .dword  preset_d5
         .word   6, 10
-        .quad   0
-        .quad   preset_d6
+        .dword  0
+        .dword  preset_d6
         .word   5, 49
-        .quad   0
+        .dword  0
 define(PRESET_STRIDE, 24)
 
 prompt_size:    .string "how many elements (1 to 10): "
-prompt_elem:    .string "  arr[%d] = "
-prompt_target:  .string "target sum: "
+prompt_elem:    .string "arr[%d] = "
+prompt_target:  .string "target sum (-9999 to 9999): "
 prompt_speed:   .string "animation delay in ms (100 to 3000): "
 prompt_cont:    .string "  press enter to continue . . ."
+hint_values:    .string "values run from -99 to 999, which is what the cells have room for."
 
-msg_need_arr:   .string "set an array first."
-msg_need_tgt:   .string "set a target first."
+msg_need_arr:   .string "set an array first.  menu option [1] or [2]."
+msg_need_tgt:   .string "set a target first.  menu option [1] or [3]."
 msg_saved:      .string "saved."
 msg_bye:        .string "bye."
+
+// Shown on the notice row when an answer is rejected. Both name the
+// cause and the range, so the fix is on screen with the complaint.
+err_not_int:    .string "that is not a whole number.  enter a value from %d to %d."
+err_range:      .string "%d is out of range.  enter a value from %d to %d."
 
 phase_brute:    .string "BRUTE FORCE     check every pair (i, j) with i < j"
 phase_hash:     .string "HASH SET        for each i, look up target - arr[i]"
@@ -119,7 +146,9 @@ narr_hs_probe_start: .string "look up %d.  initial slot = %d & 0x0F = %d."
 narr_hs_probe_empty: .string "slot %d is empty.  complement is not in the table yet."
 narr_hs_probe_hit:   .string "slot %d holds %d, from arr[%d].  that is our complement."
 narr_hs_probe_coll:  .string "slot %d holds %d (not %d).  linear-probe to slot %d."
+narr_hs_ins_start:   .string "insert %d.  initial slot = %d & 0x0F = %d."
 narr_hs_insert:      .string "record (val=%d, idx=%d) at slot %d, then move on."
+narr_hs_ins_dup:     .string "%d is already at slot %d, from arr[%d].  the first index stays."
 narr_hs_none:        .string "walked every element.  no pair sums to %d."
 narr_hs_result:      .string "result: arr[%d] (%d) + arr[%d] (%d) = %d.  probes: %d  inserts: %d."
 
@@ -145,8 +174,10 @@ run_target_fmt: .string "target = %d"
 // Colour legends drawn once per run.  The SGR codes are embedded
 // directly in the string so the word "yellow" literally renders in
 // yellow, "cyan" in cyan, and so on -- self-demonstrating legend.
+// Both start at column 4 and stay inside 80 columns, which is why
+// the hash legend says "probe" rather than "probing".
 legend_bf:      .string "\x1b[90mlegend:\x1b[0m  \x1b[33myellow\x1b[0m = i    \x1b[36mcyan\x1b[0m = j    \x1b[32mgreen\x1b[0m = match"
-legend_hs:      .string "\x1b[90mlegend:\x1b[0m  \x1b[35mmagenta\x1b[0m = probing    \x1b[32mgreen\x1b[0m = hit    \x1b[31mred\x1b[0m = collision    \x1b[33myellow\x1b[0m = insert"
+legend_hs:      .string "\x1b[90mlegend:\x1b[0m  \x1b[35mmagenta\x1b[0m = probe    \x1b[32mgreen\x1b[0m = hit    \x1b[31mred\x1b[0m = collision    \x1b[33myellow\x1b[0m = insert"
 
 // Welcome splash shown once on startup.
 splash_box_t:   .string "╭──────────────────────────────────╮"
@@ -159,6 +190,7 @@ splash_l4:      .string "6 presets, manual input, adjustable speed.  MIT license
 splash_prmpt:   .string "press enter to begin . . ."
 
 fmt_int:        .string "%d"
+fmt_token:      .string "%15s"
 fmt_idx_head:   .string " [%d] "
 fmt_cell_val:   .string "[%3d]"
 fmt_cell_empty: .string "[ . ]"
@@ -183,7 +215,15 @@ hash_vals:      .skip HASH_SIZE * 4
 hash_idx:       .skip HASH_SIZE * 4
 hash_used:      .skip HASH_SIZE
 anim_delay:     .skip 4
-scanf_scratch:  .skip 8
+tok_buf:        .skip 32
+
+// Where the live prompt sits and what it says, so a rejected answer
+// can wipe the line and ask again in the same place.
+        .balign 8
+prompt_str:     .skip 8
+prompt_row:     .skip 4
+prompt_col:     .skip 4
+prompt_arg:     .skip 4
 
 
         .text
@@ -217,7 +257,8 @@ main_loop:
         mov     w0, 0
         mov     w1, 7
         bl      read_int_range
-
+        cbz     w1, main_exit               // stdin closed: leave the same
+                                            // way option 0 does
         cmp     w0, 0
         b.eq    main_exit
         cmp     w0, 1
@@ -463,15 +504,11 @@ draw_main_menu:
         bl      printf
         bl      reset_sgr
 
-        mov     w0, 22
+        mov     w0, STATUS_ROW
         mov     w1, 4
-        bl      move_cursor
-        ldr     x0, =menu_prompt
-        bl      printf
-
-        bl      show_cursor_call
-        mov     x0, 0
-        bl      fflush
+        ldr     x2, =menu_prompt
+        mov     w3, 0
+        bl      ask_prompt
 
         ldp     fp, lr, [sp], 16
         ret
@@ -651,16 +688,14 @@ set_from_preset:
 
         mov     w0, 15
         mov     w1, 4
-        bl      move_cursor
-        ldr     x0, =menu_prompt
-        bl      printf
-        bl      show_cursor_call
-        mov     x0, 0
-        bl      fflush
+        ldr     x2, =menu_prompt
+        mov     w3, 0
+        bl      ask_prompt
 
         mov     w0, 0
         mov     w1, 6
         bl      read_int_range
+        cbz     w1, sfp_cancel
         cbz     w0, sfp_cancel
 
         // Look up the chosen row: &preset_table + (choice - 1) * 24.
@@ -676,17 +711,7 @@ set_from_preset:
         add     x2, x1, 12
         add     x1, x1, 8
         bl      apply_preset
-
-        bl      hide_cursor_call
-        mov     w0, 22
-        mov     w1, 4
-        bl      move_cursor
-        mov     w0, 32
-        bl      set_sgr
-        ldr     x0, =msg_saved
-        bl      printf
-        bl      reset_sgr
-        bl      wait_enter
+        bl      show_saved
 
 sfp_cancel:
         ldp     fp, lr, [sp], 16
@@ -733,6 +758,9 @@ ap_done:
 // integers into arr[]. The size and index need to survive across
 // printf and scanf calls in the loop, so we park them in the stack
 // frame rather than using callee-saved registers.
+//
+// Each element gets its own row (7 upwards) so a rejected value can
+// be re-asked in place without the screen sliding around.
 set_from_manual:
         stp     fp, lr, [sp, -32]!
         mov     fp, sp
@@ -740,18 +768,25 @@ set_from_manual:
         bl      clear_screen
         bl      draw_header
 
-        mov     w0, 5
+        mov     w0, 6
         mov     w1, 4
         bl      move_cursor
-        ldr     x0, =prompt_size
+        mov     w0, 90
+        bl      set_sgr
+        ldr     x0, =hint_values
         bl      printf
-        bl      show_cursor_call
-        mov     x0, 0
-        bl      fflush
+        bl      reset_sgr
+
+        mov     w0, 5
+        mov     w1, 4
+        ldr     x2, =prompt_size
+        mov     w3, 0
+        bl      ask_prompt
 
         mov     w0, 1
         mov     w1, ARRAY_MAX
         bl      read_int_range
+        cbz     w1, sfm_leave
         str     w0, [fp, 16]
 
         ldr     x9, =n
@@ -764,13 +799,16 @@ sfm_loop:
         cmp     w9, w10
         b.ge    sfm_done
 
-        ldr     x0, =prompt_elem
-        mov     w1, w9
-        bl      printf
-        mov     x0, 0
-        bl      fflush
+        add     w0, w9, 7                   // one row per element
+        mov     w1, 6
+        ldr     x2, =prompt_elem
+        mov     w3, w9
+        bl      ask_prompt
 
-        bl      read_int_any
+        mov     w0, VALUE_MIN
+        mov     w1, VALUE_MAX
+        bl      read_int_range
+        cbz     w1, sfm_leave
 
         ldr     x9, =arr
         ldr     w10, [fp, 20]
@@ -781,17 +819,9 @@ sfm_loop:
         str     w9, [fp, 20]
         b       sfm_loop
 sfm_done:
-        bl      hide_cursor_call
-        mov     w0, 22
-        mov     w1, 4
-        bl      move_cursor
-        mov     w0, 32
-        bl      set_sgr
-        ldr     x0, =msg_saved
-        bl      printf
-        bl      reset_sgr
-        bl      wait_enter
+        bl      show_saved
 
+sfm_leave:
         ldp     fp, lr, [sp], 32
         ret
 
@@ -808,14 +838,14 @@ set_target_interactive:
 
         mov     w0, 5
         mov     w1, 4
-        bl      move_cursor
-        ldr     x0, =prompt_target
-        bl      printf
-        bl      show_cursor_call
-        mov     x0, 0
-        bl      fflush
+        ldr     x2, =prompt_target
+        mov     w3, 0
+        bl      ask_prompt
 
-        bl      read_int_any
+        mov     w0, TARGET_MIN
+        mov     w1, TARGET_MAX
+        bl      read_int_range
+        cbz     w1, sti_leave
 
         ldr     x9, =target
         str     w0, [x9]
@@ -823,17 +853,9 @@ set_target_interactive:
         mov     w10, 1
         str     w10, [x9]
 
-        bl      hide_cursor_call
-        mov     w0, 7
-        mov     w1, 4
-        bl      move_cursor
-        mov     w0, 32
-        bl      set_sgr
-        ldr     x0, =msg_saved
-        bl      printf
-        bl      reset_sgr
-        bl      wait_enter
+        bl      show_saved
 
+sti_leave:
         ldp     fp, lr, [sp], 16
         ret
 
@@ -849,31 +871,21 @@ set_speed:
 
         mov     w0, 5
         mov     w1, 4
-        bl      move_cursor
-        ldr     x0, =prompt_speed
-        bl      printf
-        bl      show_cursor_call
-        mov     x0, 0
-        bl      fflush
+        ldr     x2, =prompt_speed
+        mov     w3, 0
+        bl      ask_prompt
 
         mov     w0, 100
         mov     w1, 3000
         bl      read_int_range
+        cbz     w1, ss_leave
 
         ldr     x1, =anim_delay
         str     w0, [x1]
 
-        bl      hide_cursor_call
-        mov     w0, 7
-        mov     w1, 4
-        bl      move_cursor
-        mov     w0, 32
-        bl      set_sgr
-        ldr     x0, =msg_saved
-        bl      printf
-        bl      reset_sgr
-        bl      wait_enter
+        bl      show_saved
 
+ss_leave:
         ldp     fp, lr, [sp], 16
         ret
 
@@ -1189,9 +1201,9 @@ dh_loop:
         bl      move_cursor
         mov     w0, 90
         bl      set_sgr
-        ldr     x0, =fmt_cell_val
-        ldr     w1, [fp, 24]
-        bl      printf
+        ldr     x0, =fmt_idx_head           // same shape as the array's
+        ldr     w1, [fp, 24]                // index row, so a label never
+        bl      printf                      // reads as a stored value
         bl      reset_sgr
 
         // Value row, one below the label row.
@@ -1389,8 +1401,12 @@ ds_done:
 //   w24  j
 //   w28  max pairs = n*(n-1)/2, printed next to the live counter
 run_brute_force:
-        stp     fp, lr, [sp, -16]!
+        stp     fp, lr, [sp, -80]!
         mov     fp, sp
+        stp     x19, x20, [sp, 16]
+        stp     x21, x22, [sp, 32]
+        stp     x23, x24, [sp, 48]
+        stp     x27, x28, [sp, 64]
 
         bl      hide_cursor_call
         bl      clear_screen
@@ -1590,7 +1606,11 @@ bf_none:
         bl      frame_wait_then_return
 
 bf_end:
-        ldp     fp, lr, [sp], 16
+        ldp     x19, x20, [sp, 16]
+        ldp     x21, x22, [sp, 32]
+        ldp     x23, x24, [sp, 48]
+        ldp     x27, x28, [sp, 64]
+        ldp     fp, lr, [sp], 80
         ret
 
 
@@ -1613,8 +1633,13 @@ bf_end:
 //   w27  current probe slot
 //   w28  found slot (on hit) / insertion slot (on insert)
 run_hash_set:
-        stp     fp, lr, [sp, -16]!
+        stp     fp, lr, [sp, -96]!
         mov     fp, sp
+        stp     x19, x20, [sp, 16]
+        stp     x21, x22, [sp, 32]
+        stp     x23, x24, [sp, 48]
+        stp     x25, x26, [sp, 64]
+        stp     x27, x28, [sp, 80]
 
         bl      hide_cursor_call
         bl      clear_screen
@@ -1811,15 +1836,111 @@ hs_probe_empty:
         bl      draw_stats
         bl      frame_flush_delay
 
-        // Find where val belongs and insert.
+        // Now find where val itself belongs. This walk gets the same
+        // frame-per-slot treatment as the lookup above, and each slot
+        // it steps over counts as a probe, so the collision chain the
+        // insert pays for is visible instead of happening off screen.
         and     w28, w25, HASH_MASK
+        bl      clear_trace_area
+        mov     w0, 19
+        mov     w1, 6
+        bl      move_cursor
+        mov     w1, w25
+        mov     w2, w25
+        mov     w3, w28
+        ldr     x0, =narr_hs_ins_start
+        bl      printf
+
+        mov     w0, w24
+        mov     w1, -1
+        mov     w2, 0
+        bl      draw_array
+        mov     w0, w28
+        mov     w1, 0
+        bl      draw_hash
+        mov     w0, 1
+        mov     w1, w22
+        mov     w2, w23
+        bl      draw_stats
+        bl      frame_flush_delay
+
 rh_ins_scan:
+        add     w22, w22, 1
+
         ldr     x9, =hash_used
         ldrb    w10, [x9, w28, UXTW]
         cbz     w10, rh_ins_place
+
+        ldr     x9, =hash_vals
+        ldr     w10, [x9, w28, UXTW #2]
+        cmp     w10, w25
+        b.eq    rh_ins_dup
+
+        // Somebody else is here: announce, advance, frame.
+        bl      clear_trace_area
+        mov     w0, 19
+        mov     w1, 6
+        bl      move_cursor
+
+        ldr     x9, =hash_vals
+        ldr     w10, [x9, w28, UXTW #2]
+        add     w11, w28, 1
+        and     w11, w11, HASH_MASK
+        mov     w1, w28
+        mov     w2, w10
+        mov     w3, w25
+        mov     w4, w11
+        ldr     x0, =narr_hs_probe_coll
+        bl      printf
+
+        mov     w0, w24
+        mov     w1, -1
+        mov     w2, 0
+        bl      draw_array
+        mov     w0, w28
+        mov     w1, 2
+        bl      draw_hash
+        mov     w0, 1
+        mov     w1, w22
+        mov     w2, w23
+        bl      draw_stats
+        bl      frame_flush_delay
+
         add     w28, w28, 1
         and     w28, w28, HASH_MASK
         b       rh_ins_scan
+
+rh_ins_dup:
+        // val is already in the table from an earlier index. Leave
+        // that entry alone: a later lookup should report where the
+        // value first appeared, which is also what two_sum.asm does.
+        bl      clear_trace_area
+        mov     w0, 19
+        mov     w1, 6
+        bl      move_cursor
+        ldr     x9, =hash_idx
+        ldr     w10, [x9, w28, UXTW #2]
+        mov     w1, w25
+        mov     w2, w28
+        mov     w3, w10
+        ldr     x0, =narr_hs_ins_dup
+        bl      printf
+
+        mov     w0, w24
+        mov     w1, -1
+        mov     w2, 0
+        bl      draw_array
+        mov     w0, w28
+        mov     w1, 1
+        bl      draw_hash
+        mov     w0, 1
+        mov     w1, w22
+        mov     w2, w23
+        bl      draw_stats
+        bl      frame_flush_delay
+
+        add     w24, w24, 1
+        b       hs_outer
 
 rh_ins_place:
         ldr     x9, =hash_vals
@@ -1936,7 +2057,12 @@ hs_none:
         bl      frame_wait_then_return
 
 hs_end:
-        ldp     fp, lr, [sp], 16
+        ldp     x19, x20, [sp, 16]
+        ldp     x21, x22, [sp, 32]
+        ldp     x23, x24, [sp, 48]
+        ldp     x25, x26, [sp, 64]
+        ldp     x27, x28, [sp, 80]
+        ldp     fp, lr, [sp], 96
         ret
 
 
@@ -2064,43 +2190,260 @@ delay_ms:
         ret
 
 
-// read_int_any reads one integer from stdin via scanf and returns it
-// in w0. scanf needs a pointer to storage for its output; we use a
-// single shared slot in .bss rather than a stack slot because the
-// program is single-threaded and only one read is in flight at a
-// time.
-read_int_any:
+// ask_prompt paints a prompt and remembers where it sits, so a
+// rejected answer can wipe the line and ask again in the same place
+// instead of letting the screen scroll away underneath the frame.
+//
+// Input:  w0 = row, w1 = col, x2 = prompt string, w3 = printf argument
+ask_prompt:
         stp     fp, lr, [sp, -16]!
         mov     fp, sp
-        ldr     x0, =fmt_int
-        ldr     x1, =scanf_scratch
-        bl      scanf
-        ldr     x0, =scanf_scratch
-        ldr     w0, [x0]
+        ldr     x9, =prompt_row
+        str     w0, [x9]
+        ldr     x9, =prompt_col
+        str     w1, [x9]
+        ldr     x9, =prompt_str
+        str     x2, [x9]
+        ldr     x9, =prompt_arg
+        str     w3, [x9]
+        bl      repaint_prompt
         ldp     fp, lr, [sp], 16
         ret
 
 
-// read_int_range reads integers until the user gives one inside the
-// inclusive [min, max] range, then returns it. Min and max need to
-// survive across the bl to read_int_any, so they sit in the stack
-// frame.
+// repaint_prompt blanks the prompt row and draws the staged prompt
+// again, leaving the cursor after it and visible.
+repaint_prompt:
+        stp     fp, lr, [sp, -16]!
+        mov     fp, sp
+
+        ldr     x9, =prompt_row
+        ldr     w0, [x9]
+        mov     w1, 1
+        bl      move_cursor
+        ldr     x0, =fmt_blank_80
+        bl      printf
+
+        ldr     x9, =prompt_row
+        ldr     w0, [x9]
+        ldr     x9, =prompt_col
+        ldr     w1, [x9]
+        bl      move_cursor
+        ldr     x9, =prompt_str
+        ldr     x0, [x9]
+        ldr     x9, =prompt_arg
+        ldr     w1, [x9]
+        bl      printf
+
+        bl      show_cursor_call
+        mov     x0, 0
+        bl      fflush
+
+        ldp     fp, lr, [sp], 16
+        ret
+
+
+// clear_notice wipes the notice row. Called once an answer is
+// accepted so a stale complaint never outlives the thing it was
+// complaining about.
+clear_notice:
+        stp     fp, lr, [sp, -16]!
+        mov     fp, sp
+        mov     w0, NOTICE_ROW
+        mov     w1, 1
+        bl      move_cursor
+        ldr     x0, =fmt_blank_80
+        bl      printf
+        ldp     fp, lr, [sp], 16
+        ret
+
+
+// show_notice paints one red line on the notice row saying why the
+// last answer was rejected. The arguments go to the stack first
+// because move_cursor needs w0-w2 for itself.
+//
+// Input:  x0 = format, w1 / w2 / w3 = its arguments
+show_notice:
+        stp     fp, lr, [sp, -48]!
+        mov     fp, sp
+        str     x0, [fp, 16]
+        str     w1, [fp, 24]
+        str     w2, [fp, 28]
+        str     w3, [fp, 32]
+
+        bl      clear_notice
+        mov     w0, NOTICE_ROW
+        mov     w1, 4
+        bl      move_cursor
+        mov     w0, 31
+        bl      set_sgr
+        ldr     x0, [fp, 16]
+        ldr     w1, [fp, 24]
+        ldr     w2, [fp, 28]
+        ldr     w3, [fp, 32]
+        bl      printf
+        bl      reset_sgr
+
+        ldp     fp, lr, [sp], 48
+        ret
+
+
+// show_saved confirms that an input screen took what was typed, then
+// waits. Every screen puts it on the same row, right above the
+// continue prompt, so the confirmation is always in one place.
+show_saved:
+        stp     fp, lr, [sp, -16]!
+        mov     fp, sp
+        bl      hide_cursor_call
+        mov     w0, STATUS_ROW
+        mov     w1, 4
+        bl      move_cursor
+        mov     w0, 32
+        bl      set_sgr
+        ldr     x0, =msg_saved
+        bl      printf
+        bl      reset_sgr
+        bl      wait_enter
+        ldp     fp, lr, [sp], 16
+        ret
+
+
+// read_token reads one whitespace-delimited token into tok_buf. The
+// width in the format string keeps a long line from running past the
+// end of the buffer, and reading a token rather than a number means
+// junk gets consumed instead of jamming every later read.
+//
+// Output: w0 = 1 when a token arrived, 0 at end of input
+read_token:
+        stp     fp, lr, [sp, -16]!
+        mov     fp, sp
+        ldr     x0, =fmt_token
+        ldr     x1, =tok_buf
+        bl      scanf
+        cmp     w0, 1
+        b.eq    rt_ok
+        mov     w0, 0
+        b       rt_done
+rt_ok:
+        mov     w0, 1
+rt_done:
+        ldp     fp, lr, [sp], 16
+        ret
+
+
+// parse_int converts the token sitting in tok_buf to an integer. A
+// leading sign is allowed, everything after it has to be a digit,
+// and the digit count is capped so the value stays well inside the
+// 32-bit range. Leaf function, no calls, so it needs no frame.
+//
+// Output: w0 = value
+//         w1 = 1 when the token was a whole number, 0 otherwise
+parse_int:
+        ldr     x9, =tok_buf
+        ldrb    w10, [x9]
+        mov     w11, 0                      // 1 once we have seen a -
+        cmp     w10, '-'
+        b.ne    pi_plus
+        mov     w11, 1
+        add     x9, x9, 1
+        b       pi_digits
+pi_plus:
+        cmp     w10, '+'
+        b.ne    pi_digits
+        add     x9, x9, 1
+
+pi_digits:
+        mov     w12, 0                      // value so far
+        mov     w13, 0                      // digits seen
+pi_loop:
+        ldrb    w10, [x9]
+        cbz     w10, pi_end
+        cmp     w10, '0'
+        b.lt    pi_bad
+        cmp     w10, '9'
+        b.gt    pi_bad
+        sub     w10, w10, '0'
+        mov     w14, 10
+        mul     w12, w12, w14
+        add     w12, w12, w10
+        add     w13, w13, 1
+        cmp     w13, DIGIT_MAX
+        b.gt    pi_bad
+        add     x9, x9, 1
+        b       pi_loop
+
+pi_end:
+        cbz     w13, pi_bad                 // a lone sign is not a number
+        cbz     w11, pi_pos
+        sub     w12, wzr, w12
+pi_pos:
+        mov     w0, w12
+        mov     w1, 1
+        ret
+
+pi_bad:
+        mov     w0, 0
+        mov     w1, 0
+        ret
+
+
+// read_int_range asks the staged prompt until the answer is a whole
+// number inside the inclusive [min, max] range. Junk and out-of-range
+// numbers each get their own line on the notice row and the prompt
+// comes back; running out of input is reported to the caller instead
+// of looping on a read that can never succeed again.
 //
 // Input:  w0 = min, w1 = max
 // Output: w0 = validated integer
+//         w1 = 1 when the value is good, 0 when stdin ran out
 read_int_range:
         stp     fp, lr, [sp, -32]!
         mov     fp, sp
         str     w0, [fp, 16]
         str     w1, [fp, 20]
 rir_try:
-        bl      read_int_any
+        bl      read_token
+        cbz     w0, rir_eof
+
+        bl      parse_int
+        cbz     w1, rir_not_int
+        str     w0, [fp, 24]
+
         ldr     w9, [fp, 16]
         cmp     w0, w9
-        b.lt    rir_try
+        b.lt    rir_out
         ldr     w9, [fp, 20]
         cmp     w0, w9
-        b.gt    rir_try
+        b.gt    rir_out
+
+        bl      clear_notice
+        ldr     w0, [fp, 24]
+        mov     w1, 1
+        b       rir_done
+
+rir_not_int:
+        ldr     x0, =err_not_int
+        ldr     w1, [fp, 16]
+        ldr     w2, [fp, 20]
+        mov     w3, 0
+        bl      show_notice
+        bl      repaint_prompt
+        b       rir_try
+
+rir_out:
+        ldr     x0, =err_range
+        ldr     w1, [fp, 24]
+        ldr     w2, [fp, 16]
+        ldr     w3, [fp, 20]
+        bl      show_notice
+        bl      repaint_prompt
+        b       rir_try
+
+rir_eof:
+        mov     w0, 0
+        mov     w1, 0
+
+rir_done:
         ldp     fp, lr, [sp], 32
         ret
 
