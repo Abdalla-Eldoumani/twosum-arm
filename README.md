@@ -6,7 +6,7 @@ finds its pair, and a console mode that asks the same questions and
 just prints the answers.
 
 Run the visualizer in a browser, no toolchain:
-<https://aarch64-playground.vercel.app/playground?example=two-sum>
+<https://aarch64-playground.com/playground?example=two-sum>
 
 ## Why
 
